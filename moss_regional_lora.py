@@ -17,9 +17,9 @@ import comfy.utils
 import comfy.weight_adapter
 import folder_paths
 from comfy_api.latest import io
-from comfy_api.latest._io import _DynamicGroup
 
 WRAPPER_KEY = "moss_regional_lora"
+RegionLoRA = io.Custom("MOSS_REGION_LORA")
 # adapters with a purely additive forward delta h(x); OFT/BOFT transform the output instead
 ADDITIVE_ADAPTERS = (comfy.weight_adapter.LoRAAdapter, comfy.weight_adapter.LoHaAdapter, comfy.weight_adapter.LoKrAdapter)
 
@@ -124,6 +124,28 @@ def load_region_lora(model, key_map, lora_name, strength, region, targets):
         raise ValueError("MOSS regional LoRA: '{}' matched no MOSS-Image layers.".format(lora_name))
 
 
+class MOSSImageRegionLoRA(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MOSSImageRegionLoRA",
+            display_name="MOSS-Image Region LoRA",
+            category="model/conditioning/moss_image",
+            description="One LoRA and the box it is confined to, for MOSS-Image Regional LoRA.",
+            inputs=[
+                io.Int.Input("box", default=1, min=1, max=100, tooltip="Number of the box, as tagged in the Create Bounding Boxes preview."),
+                io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras")),
+                io.Float.Input("strength", default=1.0, min=-100.0, max=100.0, step=0.01),
+            ],
+            outputs=[RegionLoRA.Output(display_name="region")],
+            is_experimental=True,
+        )
+
+    @classmethod
+    def execute(cls, box, lora_name, strength) -> io.NodeOutput:
+        return io.NodeOutput({"box": box, "lora_name": lora_name, "strength": strength})
+
+
 class MOSSImageRegionalLoRA(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -135,18 +157,8 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
             inputs=[
                 io.Model.Input("model"),
                 io.Array.Input("elements", tooltip="Prompt elements from the node Create Bounding Boxes."),
-                _DynamicGroup.Input(
-                    "regions",
-                    template=[
-                        io.Int.Input("box", default=1, min=1, max=100, tooltip="Number of the box, as tagged in the Create Bounding Boxes preview."),
-                        io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras")),
-                        io.Float.Input("strength", default=1.0, min=-100.0, max=100.0, step=0.01),
-                    ],
-                    min=1,
-                    max=20,
-                    tooltip="Each row applies one LoRA inside one box.",
-                    group_name="Region",
-                ),
+                io.Autogrow.Input("regions", template=io.Autogrow.TemplatePrefix(
+                    RegionLoRA.Input("region", tooltip="A MOSS-Image Region LoRA: one LoRA applied inside one box."), prefix="region", min=1, max=20)),
                 io.Float.Input("seam_feather", default=0.05, min=0.0, max=0.5, step=0.01, tooltip="Inward fade at the box edges as a fraction of the image. 0 is a hard edge."),
                 io.Boolean.Input("lora_on_text", default=False, tooltip="Also apply every region's LoRA to all text tokens. Off keeps the LoRAs off the shared prompt tokens."),
             ],
@@ -160,8 +172,9 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
             raise ValueError("MOSS-Image Regional LoRA only supports MOSS-Image models.")
         key_map = comfy.lora.model_lora_keys_unet(model.model, {})
         boxes, strengths, targets = [], [], {}
-        for row in regions:
-            if not row.get("lora_name") or row["strength"] == 0:
+        for name in sorted(regions, key=lambda name: int(name.removeprefix("region"))):
+            row = regions[name]
+            if row is None or row["strength"] == 0:
                 continue
             box = row["box"]
             if not 1 <= box <= len(elements):

@@ -178,9 +178,13 @@ Only worth it if the Phase 2 matrices show off-diagonal similarity that Design A
 
   So every key format and adapter type that core supports works without a local copy. The two test LoRAs report **246 matched adapters**: 41 layers × q, k, v, o, ffn_up_gate, ffn_down. Non-additive patches (OFT/BOFT, diff, set) are logged and ignored, and a LoRA with 0 matches raises an error.
 - **int8 `ffn_down`:** no block-level hook. The wrapper sets `comfy_force_forward = True` on each hooked module for the duration of the forward call, and restores it in `finally`. `linear_input_act` then takes its eager path, `linear(situ(x))` (`comfy/ops.py:1044-1046`), so the module forward and its hook run, with the int8 GEMM still doing the matmul. Core bypass LoRA uses the same flag (`comfy/weight_adapter/bypass.py:202-203`).
-- **Node:** `MOSSImageRegionalLoRA`.
-  - Inputs: `model`, `elements`, `regions` (DynamicGroup rows `box`, `lora_name`, `strength`, the same row pattern as core `LoadLoraModel`), `seam_feather`, `lora_on_text`.
-  - `box` is the 1-based box number, the same numbering as the Layout Prompt's `character_boxes`. The grid comes from the latent at call time, so there are no width/height inputs.
+- **Nodes:**
+  - `MOSSImageRegionLoRA`: `box`, `lora_name`, `strength`. It outputs a `MOSS_REGION_LORA`.
+  - `MOSSImageRegionalLoRA`: `model`, `elements`, `regions` (Autogrow of `MOSS_REGION_LORA`), `seam_feather`, `lora_on_text`.
+
+  `box` is the 1-based box number, the same numbering as the Layout Prompt's `character_boxes`. The grid comes from the latent at call time, so there are no width/height inputs.
+
+  A first version used core's `_DynamicGroup` rows, as `LoadLoraModel` does. The installed frontend (1.55.18) has no renderer for `COMFY_DYNAMICGROUP_V3` and showed `regions` as a dead socket. Autogrow is rendered, which is why there is a separate Region LoRA node.
 
 ### Single-forward checks
 

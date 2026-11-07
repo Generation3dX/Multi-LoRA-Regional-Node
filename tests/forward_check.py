@@ -58,7 +58,7 @@ def run(patcher, x, sigma, ctx):
 
 
 def regional(patcher, bbox, lora_on_text):
-    regions = [{"box": 1, "lora_name": lora_name, "strength": 1.0}]
+    regions = {"region0": {"box": 1, "lora_name": lora_name, "strength": 1.0}}
     return node.MOSSImageRegionalLoRA.execute(patcher, [{"bbox": bbox}], regions, 0.0, lora_on_text).args[0]
 
 
