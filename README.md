@@ -33,7 +33,7 @@ If `width`/`height` are linked to anything other than one Resolution Selector, t
 | Input | Meaning |
 |---|---|
 | `seam_feather` | Inward fade at the box edges, as a fraction of the image. 0 is a hard edge. The LoRA never acts outside its box. |
-| `lora_on_text` | Also applies every region's LoRA to all prompt tokens. Off by default, because the prompt tokens are shared by all characters. |
+| `lora_on_text` | Advanced input, hidden by default. Also applies every region's LoRA to all prompt tokens. Off by default, because the prompt tokens are shared by all characters; Phase 2 showed it does not help. |
 
 When boxes overlap, the region with the stronger weighted mask owns each token.
 

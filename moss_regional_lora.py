@@ -160,7 +160,7 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
                 io.Autogrow.Input("regions", template=io.Autogrow.TemplatePrefix(
                     RegionLoRA.Input("region", tooltip="A MOSS-Image Region LoRA: one LoRA applied inside one box."), prefix="region", min=1, max=20)),
                 io.Float.Input("seam_feather", default=0.05, min=0.0, max=0.5, step=0.01, tooltip="Inward fade at the box edges as a fraction of the image. 0 is a hard edge."),
-                io.Boolean.Input("lora_on_text", default=False, tooltip="Also apply every region's LoRA to all text tokens. Off keeps the LoRAs off the shared prompt tokens."),
+                io.Boolean.Input("lora_on_text", default=False, tooltip="Also apply every region's LoRA to all text tokens. Off keeps the LoRAs off the shared prompt tokens.", advanced=True),
             ],
             outputs=[io.Model.Output()],
             is_experimental=True,
