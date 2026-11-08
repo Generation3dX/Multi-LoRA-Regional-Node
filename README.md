@@ -31,7 +31,7 @@ When boxes overlap, the region with the stronger weighted mask owns each token.
 
 The log reports how many layers each LoRA matched. A LoRA that matches nothing raises an error.
 
-Recommended strengths: to be measured in Phase 2.
+Recommended strength: 1.0, the same as for a global LoRA. On Yogi, Base and SFT, 1.0 keeps each identity in its box (see `DESIGN.md` §10). Leave `lora_on_text` off.
 
 ## Credits
 

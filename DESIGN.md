@@ -211,3 +211,23 @@ How to read these:
 - **D4 int8 Base:** there is **no int8_convrot Base or SFT** on disk. The only int8 files are RealismByStableYogi finetunes, whose base is unknown.
   - Rows 4-5 need the official Comfy-Org int8_convrot Base, which you would download.
   - Otherwise the Yogi int8 file becomes a labelled transfer experiment, and the int8 hook path is checked by matched counts plus a bf16-vs-int8 delta comparison instead.
+
+## 10. Phase 2 results
+
+Harness: `tests/matrix.py` queues API workflows on a running ComfyUI through `/prompt`, then scores the images with insightface `buffalo_l` (ArcFace, CPU). Setup: 1024×1024, Joni boxed on the left half and Sansa on the right, 4 fixed seeds, LoRA strength 1.0, neutral clothed portrait prompts. Each character's reference is the mean face embedding of its solo, globally applied LoRA images on the same checkpoint. Full tables are in `tests/results/results.md`, contact sheets in `tests/results/*_sheet.jpg`.
+
+Mean margin (similarity to the right character minus the wrong one):
+
+| config | Yogi V1.5 int8_convrot (transfer) | Base bf16 | SFT bf16 (transfer) |
+|---|---|---|---|
+| no LoRA (control) | 0.13 | 0.07 | 0.13 |
+| both LoRAs stacked globally | 0.02 | 0.06 | 0.05 |
+| regional | **0.42** | 0.31 | 0.36 |
+| regional + `lora_on_text` | 0.35 | **0.34** | — |
+
+- Stacking globally makes both women look like Joni: box 2 scores 0.58–0.69 against Joni. The regional node gives each box its own identity on every checkpoint. Box 2's similarity to Joni drops to 0.15–0.35, close to the no-LoRA control.
+- The int8_convrot path performs at least as well as bf16, so the `comfy_force_forward` hook path holds up on real sampling.
+- Layout also works on SFT.
+- `lora_on_text` hurts on Yogi (0.35 vs 0.42) and helps slightly on Base (0.34 vs 0.31). Keep it off by default.
+- No third person and no missing faces in any image.
+- Residual leakage through attention is small. On Yogi, box 2's similarity to Joni is 0.35 with the node vs 0.16 with no LoRA. Visually it shows up as occasional borrowed details, such as Joni's fringe on Sansa. Masking alone meets the goal, so Phase 3 (attention ownership) is not justified by these numbers.
