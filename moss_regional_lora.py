@@ -51,19 +51,27 @@ def make_hook(entries, masks):
 
 
 class RegionalLoRAWrapper:
-    def __init__(self, boxes, strengths, targets, feather, lora_on_text):
+    def __init__(self, boxes, strengths, targets, feather, lora_on_text, device, dtype):
         self.boxes = boxes
         self.strengths = strengths
         self.targets = targets  # {module name: [(region, adapter, (offset, size) or None)]}
         self.feather = feather
         self.lora_on_text = lora_on_text
-        self.device = None
-
-    def to_device(self, device, dtype):
-        for entries in self.targets.values():
-            for _, adapter, _ in entries:
-                adapter.weights = tuple(w.to(device=device, dtype=dtype) if torch.is_tensor(w) else w for w in adapter.weights)
         self.device = device
+        self.dtype = dtype
+
+    def outer_sample(self, executor, *args, **kwargs):
+        # LoRA weights live on the GPU only for one sampling call. Moving them before the sampler loads the model lets
+        # the model loader see the memory as used, and dropping them afterwards frees it for the VAE decode.
+        adapters = [adapter for entries in self.targets.values() for _, adapter, _ in entries]
+        stored = [adapter.weights for adapter in adapters]
+        try:
+            for adapter in adapters:
+                adapter.weights = tuple(w.to(device=self.device, dtype=self.dtype) if torch.is_tensor(w) else w for w in adapter.weights)
+            return executor(*args, **kwargs)
+        finally:
+            for adapter, weights in zip(adapters, stored):
+                adapter.weights = weights
 
     def masks(self, rows, cols, text_len, device, dtype):
         masks = torch.stack([box_token_mask(b, rows, cols, self.feather, device) for b in self.boxes])
@@ -75,8 +83,6 @@ class RegionalLoRAWrapper:
         return torch.cat((masks, text), dim=1).to(dtype).unsqueeze(-1).unsqueeze(1).unbind(0)
 
     def __call__(self, executor, x, timestep, context, transformer_options={}, **kwargs):
-        if self.device != x.device:
-            self.to_device(x.device, x.dtype)
         masks = self.masks(x.shape[-2], x.shape[-1], context.shape[1], x.device, x.dtype)
         dm = executor.class_obj
         handles = []
@@ -184,7 +190,8 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
             strengths.append(row["strength"])
         if not boxes:
             return io.NodeOutput(model)
+        wrapper = RegionalLoRAWrapper(boxes, strengths, targets, seam_feather, lora_on_text, model.load_device, model.model.get_dtype_inference())
         model = model.clone()
-        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, WRAPPER_KEY,
-                                   RegionalLoRAWrapper(boxes, strengths, targets, seam_feather, lora_on_text))
+        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, WRAPPER_KEY, wrapper.outer_sample)
+        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, WRAPPER_KEY, wrapper)
         return io.NodeOutput(model)

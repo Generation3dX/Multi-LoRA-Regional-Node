@@ -24,6 +24,7 @@ import torch  # noqa: E402
 
 import comfy.cli_args  # noqa: E402,F401
 import comfy.model_management  # noqa: E402
+import comfy.patcher_extension  # noqa: E402
 import comfy.sd  # noqa: E402
 import comfy.utils  # noqa: E402
 import folder_paths  # noqa: E402
@@ -54,7 +55,17 @@ def run(patcher, x, sigma, ctx):
     comfy.model_management.load_models_gpu([patcher])
     # the sampler merges the patcher's wrappers into transformer_options (comfy/sampler_helpers.py)
     transformer_options = {"wrappers": patcher.wrappers}
-    return patcher.model.apply_model(x, sigma, c_crossattn=ctx, transformer_options=transformer_options).float()
+
+    def forward():
+        return patcher.model.apply_model(x, sigma, c_crossattn=ctx, transformer_options=transformer_options).float()
+    # the sampler runs everything inside the OUTER_SAMPLE wrappers, which move the regional LoRA weights to the GPU
+    outer = patcher.wrappers.get(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, {}).get(node.WRAPPER_KEY)
+    if not outer:
+        return forward()
+    out = outer[0](forward)
+    devices = {w.device.type for entries in outer[0].__self__.targets.values() for _, a, _ in entries for w in a.weights if torch.is_tensor(w)}
+    print("regional LoRA weights after sampling are on:", devices)
+    return out
 
 
 def regional(patcher, bbox, lora_on_text):
@@ -70,7 +81,7 @@ g = torch.Generator(device="cpu").manual_seed(0)
 x = torch.randn(1, 128, 64, 64, generator=g).to(dev, dtype)
 ctx = torch.randn(1, 77, 4096, generator=g).to(dev, dtype)
 
-wrapper = node.RegionalLoRAWrapper([[0, 0, 1000, 500]], [1.0], {}, 0.0, False)
+wrapper = node.RegionalLoRAWrapper([[0, 0, 1000, 500]], [1.0], {}, 0.0, False, dev, dtype)
 m = wrapper.masks(64, 64, 77, dev, dtype)[0].reshape(-1)
 print("mask: left %.0f / %d tokens on, right %.0f, text %.0f" % (m[:4096].view(64, 64)[:, :32].sum(), 64 * 32, m[:4096].view(64, 64)[:, 32:].sum(), m[4096:].sum()))
 sigma = torch.tensor([0.6], device=dev)
