@@ -4,6 +4,8 @@ from comfy_api.latest import ComfyExtension, io
 
 from .moss_regional_lora import MOSSImageRegionalLoRA, MOSSImageRegionLoRA
 
+WEB_DIRECTORY = "./web"
+
 
 class MOSSRegionalLoRAExtension(ComfyExtension):
     @override

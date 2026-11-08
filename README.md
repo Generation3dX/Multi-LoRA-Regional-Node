@@ -22,6 +22,14 @@ Clone into `ComfyUI/custom_nodes/` and restart ComfyUI. There are no extra depen
 
 Both nodes read the same boxes, so the layout placement and the LoRA scope cannot drift apart.
 
+### Resolution Selector
+
+Link a **Resolution Selector**'s `width`/`height` to Create Bounding Boxes (and to the Layout Prompt and the latent). This pack's frontend script then keeps the canvas at the selector's exact output and rescales the drawn boxes with it. The canvas updates live when you change the aspect ratio or megapixels, and again before every run.
+
+Without the script, Create Bounding Boxes would silently shrink or stretch the boxes. It saves them in pixels of its own size widgets, but the backend divides them by the linked size, which the canvas never sees.
+
+If `width`/`height` are linked to anything other than one Resolution Selector, the run is refused with an error toast. Leaving both unlinked is fine. The browser console logs one `[MOSS bbox sync]` line per bbox node on every run.
+
 | Input | Meaning |
 |---|---|
 | `seam_feather` | Inward fade at the box edges, as a fraction of the image. 0 is a hard edge. The LoRA never acts outside its box. |
