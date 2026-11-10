@@ -135,9 +135,9 @@ class MOSSImageRegionLoRA(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="MOSSImageRegionLoRA",
-            display_name="MOSS-Image Region LoRA",
+            display_name="MOSS-Image Regional LoRA Loader",
             category="model/conditioning/moss_image",
-            description="One LoRA and the box it is confined to, for MOSS-Image Regional LoRA.",
+            description="One LoRA and the box it is confined to, for MOSS-Image Apply Regional LoRAs.",
             inputs=[
                 io.Int.Input("box", default=1, min=1, max=100, tooltip="Number of the box, as tagged in the Create Bounding Boxes preview."),
                 io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras")),
@@ -157,14 +157,14 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="MOSSImageRegionalLoRA",
-            display_name="MOSS-Image Regional LoRA",
+            display_name="MOSS-Image Apply Regional LoRAs",
             category="model/conditioning/moss_image",
             description="Applies each LoRA only inside its bounding box. Use the same Create Bounding Boxes elements for the MOSS-Image Layout Prompt.",
             inputs=[
                 io.Model.Input("model"),
                 io.Array.Input("elements", tooltip="Prompt elements from the node Create Bounding Boxes."),
                 io.Autogrow.Input("regions", template=io.Autogrow.TemplatePrefix(
-                    RegionLoRA.Input("region", tooltip="A MOSS-Image Region LoRA: one LoRA applied inside one box."), prefix="region", min=1, max=20)),
+                    RegionLoRA.Input("region", tooltip="A MOSS-Image Regional LoRA Loader: one LoRA applied inside one box."), prefix="region", min=1, max=20)),
                 io.Float.Input("seam_feather", default=0.05, min=0.0, max=0.5, step=0.01, tooltip="Inward fade at the box edges as a fraction of the image. 0 is a hard edge."),
                 io.Boolean.Input("lora_on_text", default=False, tooltip="Also apply every region's LoRA to all text tokens. Off keeps the LoRAs off the shared prompt tokens.", advanced=True),
             ],
@@ -175,7 +175,7 @@ class MOSSImageRegionalLoRA(io.ComfyNode):
     @classmethod
     def execute(cls, model, elements, regions, seam_feather, lora_on_text) -> io.NodeOutput:
         if not isinstance(model.model, comfy.model_base.MOSSImage):
-            raise ValueError("MOSS-Image Regional LoRA only supports MOSS-Image models.")
+            raise ValueError("MOSS-Image Apply Regional LoRAs only supports MOSS-Image models.")
         key_map = comfy.lora.model_lora_keys_unet(model.model, {})
         boxes, strengths, targets = [], [], {}
         for name in sorted(regions, key=lambda name: int(name.removeprefix("region"))):

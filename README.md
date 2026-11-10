@@ -14,11 +14,11 @@ Clone into `ComfyUI/custom_nodes/` and restart ComfyUI. There are no extra depen
 
 1. **Create Bounding Boxes**: draw one box per character. Put each character's trigger word in its box description.
 2. **MOSS-Image Layout Prompt**: wire in `elements`, and list the character boxes in `character_boxes`. Its output goes to `CLIPTextEncode`.
-3. **MOSS-Image Region LoRA**: add one per character, with these settings:
+3. **MOSS-Image Regional LoRA Loader**: add one per character, with these settings:
    - `box`: the box number from the Create Bounding Boxes preview.
    - `lora_name`: picked from `models/loras` and its subfolders.
    - `strength`.
-4. **MOSS-Image Regional LoRA**: wire in `model`, the **same** `elements`, and each Region LoRA into `regions`. A new `region` socket appears every time you connect one. The output `MODEL` goes to the sampler. No separate LoRA loader is needed.
+4. **MOSS-Image Apply Regional LoRAs**: wire in `model`, the **same** `elements`, and each Regional LoRA Loader into `regions`. A new `region` socket appears every time you connect one. The output `MODEL` goes to the sampler. The character LoRAs need no core LoRA loader.
 
 Both nodes read the same boxes, so the layout placement and the LoRA scope cannot drift apart.
 

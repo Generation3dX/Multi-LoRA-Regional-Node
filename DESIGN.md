@@ -184,7 +184,7 @@ Only worth it if the Phase 2 matrices show off-diagonal similarity that Design A
 
   `box` is the 1-based box number, the same numbering as the Layout Prompt's `character_boxes`. The grid comes from the latent at call time, so there are no width/height inputs.
 
-  A first version used core's `_DynamicGroup` rows, as `LoadLoraModel` does. The installed frontend (1.55.18) has no renderer for `COMFY_DYNAMICGROUP_V3` and showed `regions` as a dead socket. Autogrow is rendered, which is why there is a separate Region LoRA node.
+  A first version used core's `_DynamicGroup` rows, as `LoadLoraModel` does. The installed frontend (1.55.18) has no renderer for `COMFY_DYNAMICGROUP_V3` and showed `regions` as a dead socket. Autogrow is rendered, which is why there is a separate Regional LoRA Loader node (node id `MOSSImageRegionLoRA`).
 
 ### Single-forward checks
 
