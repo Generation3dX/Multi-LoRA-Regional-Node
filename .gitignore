@@ -10,3 +10,4 @@ Thumbs.db
 *.pt
 tests/results/images/
 CLAUDE.md
+tests/results/krea_placement/*.png

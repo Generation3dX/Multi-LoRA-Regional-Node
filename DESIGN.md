@@ -231,3 +231,74 @@ Mean margin (similarity to the right character minus the wrong one):
 - `lora_on_text` hurts on Yogi (0.35 vs 0.42) and helps slightly on Base (0.34 vs 0.31). Keep it off by default.
 - No third person and no missing faces in any image.
 - Residual leakage through attention is small. On Yogi, box 2's similarity to Joni is 0.35 with the node vs 0.16 with no LoRA. Visually it shows up as occasional borrowed details, such as Joni's fringe on Sansa. Masking alone meets the goal, so Phase 3 (attention ownership) is not justified by these numbers.
+
+## 11. v1.1 research: Krea 2 (2026-11-12)
+
+Goal: the same nodes drive Krea 2 as well as MOSS-Image. The model family is detected from the model and the text encoder, and there is no selector widget. The CliffNodes node is a reference for what goes wrong, not a base.
+
+### 11.1 Krea 2 forward pass (`comfy/ldm/krea2/model.py`)
+
+| | MOSS-Image | Krea 2 |
+|---|---|---|
+| Sequence | `[image \| text]` | **`[text \| image \| reference images]`**: `torch.cat((context, img))` (:355), `img_slice = [txtlen, …]` (:369), edit references appended after the image (:326) |
+| Token grid | 1 token = 1 latent pixel | patch 2 on a Wan 2.1 latent (16 ch, 8×, `supported_models.py:2021`): 1 token is still 16×16 px. Odd latent sizes are **padded up** (`pad_to_patch_size`, :287), so the grid is ceil(H/2) × ceil(W/2) |
+| LoRA layers | fused `proj.qkv`, `o`, `ffn_up_gate`, `ffn_down` | `blocks.N.attn.{wq,wk,wv,gate,wo}`, `blocks.N.mlp.{gate,up,down}`, separate q/k/v. Core maps native and diffusers names (`comfy/lora.py:368`, `comfy/utils.py:859`) |
+| Text-only layers | none | `txtfusion`: 2 layerwise blocks attend across the 12 Qwen3-VL taps **of one token** (`reshape(b*l, n, d)`, :159), a projector, then 2 refiner blocks over the text sequence (:144) |
+| Fused quantized GEMM | `ffn_down` via `linear_input_act` | none: module hooks fire on int8/fp8 without `comfy_force_forward` |
+| Attention hook | none needed | `attn1_patch` may return `attn_mask` (:86-90), which is passed to `optimized_attention_masked` (:99): a core route to regional attention without FlexAttention |
+
+The user's Krea 2 character LoRAs (ai-toolkit, rank 32) train **256 layers**: 224 in the 28 blocks and **32 in `txtfusion`**. Those 32 act only on text, which every character shares.
+
+### 11.2 Placement probe: Krea 2 does not read box coordinates
+
+`tests/krea_placement.py`, Krea 2 turbo int8_convrot, no LoRAs, 4 seeds, 1024². A hit means a detected face centre lies inside the box. Contact sheets are in `tests/results/krea_placement/`.
+
+| layout | prompt | box 1 | box 2 |
+|---|---|---|---|
+| two halves | prose, no positions | 4/4 | 4/4 |
+| two halves | prose, left/right | 4/4 | 4/4 |
+| two halves | Ideogram JSON with bboxes | 4/4 | 4/4 (2 overlap the seam) |
+| small back-left + large right | prose, no positions | 0/4 | 4/4 |
+| small back-left + large right | prose, position and size words | **3/4** | 4/4 |
+| small back-left + large right | Ideogram JSON with bboxes | **0/4** | 4/4 |
+
+Side-by-side is Krea 2's default composition, which is why simple two-person layouts look as if they follow the boxes. Box coordinates in the caption are ignored; position and size *words* are followed most of the time. This contradicts the CliffNodes README ("Krea 2 responds to positional box prompts the same way Ideogram 4 does"), and explains why their V12 moved to prose plus attention steering.
+
+### 11.3 CliffNodes defects that explain the artefacts
+
+1. **Token grid rounded down.** `rows, cols = H // 2, W // 2` (`krea2_regional_multilora.py:553`), but Krea 2 pads up. With an odd latent width, every mask row shifts one more token, so each LoRA lands on a diagonally sheared region instead of its box. Example: 16:9 at 1 MP is 1368×768, a latent 171 wide. With an odd height the bottom row gets no LoRA.
+2. **Text-only LoRA layers mixed globally.** In `txtfusion` the hook sees sequences shorter than the image, takes the `n_img > seq` branch and applies each region's LoRA at its *mean mask value* to all text (`_full_mask`, :596-617). Every character's identity is blended into the shared prompt, which is identity bleed by construction.
+3. **No placement.** v1 masks the LoRAs but nothing puts the subjects in the boxes. When the model composes differently, a face straddles a mask edge and gets half an identity. V12 compensates with prompt rewriting, a compose pass, FlexAttention (Triton, `torch.compile`) and a detailer.
+4. **Weights held on the GPU for the session** outside model management: the VAE-decode hang fixed in v1.0 (`5a11f2b`).
+5. Its own LoRA key parser instead of `comfy.lora`, so every trainer format needs special code (their commit `e270f75`).
+
+### 11.4 Design for v1.1
+
+**One Apply node, two families.** `MOSS-Image Apply Regional LoRAs` (to be renamed without "MOSS-Image") picks the family from `model.model`:
+
+| | MOSS-Image | Krea 2 |
+|---|---|---|
+| image span | `[0, H·W)` | `[txtlen, txtlen + ceil(H/2)·ceil(W/2))`; text and reference tokens get 0 |
+| grid | latent H × W | ceil(H/2) × ceil(W/2), mapped from the box fractions of the real latent |
+| text-only layers | none | see stages below |
+
+Everything else is shared as is: core LoRA loading, masks, overlap rule, sampling-scoped weights, the bbox/Resolution Selector sync and the test harness.
+
+**Placement through a shared prompt node.** A new `Regional Layout Encode` node (clip, elements, prompt, width, height → CONDITIONING) detects the family from the text encoder:
+- MOSS: the core Layout Prompt JSON, built by calling the core node, then encoded.
+- Krea 2: the boxes compiled into a caption with position and size words ("in the background on the left, small: …"), the form the probe showed Krea follows.
+
+Switching the family then means switching the loaders only, and the prompt and LoRA nodes stay. Three loaders change, not one: UNet, CLIP (type `moss_image` vs `krea2`, different files) and VAE (Flux.2 vs Qwen-Image/Wan 2.1).
+
+**Stage 1, simplest path, measured first:**
+- the image-token path above;
+- `txtfusion` LoRA layers skipped, logged as such. Measure how much likeness that costs against a full global LoRA on solo images;
+- the prose layout compiler.
+
+Run the Phase 2 identity matrix and the placement probe on Krea.
+
+**Stage 2, only if Stage 1 measures bleed, weak likeness or poor placement: per-region text spans.** The encode node knows the token span of each region's description and attaches it to the conditioning with a core `TransformerOptionsHook` (`comfy/hooks.py:229`), so the Apply node reads it from `transformer_options` with no core change. With spans:
+- `txtfusion` and main-block LoRA deltas apply to their own region's text span. This is the per-region form of `lora_on_text`, and replaces CliffNodes' global mix.
+- optionally an `attn1_patch` attention mask: a region's text span and its box's image tokens attend only to each other plus the shared caption. This is the core-hook form of V12's ownership, using SDPA masks, no FlexAttention or Triton. Cost to measure: masked attention can fall back from the fastest kernels.
+
+**Out of scope for v1.1:** edit/reference flows (scene and outfit transfer), compose passes and detailers. Reference-image tokens get mask 0, so an edit workflow still runs.
