@@ -30,6 +30,8 @@ Without the script, Create Bounding Boxes would silently shrink or stretch the b
 
 If `width`/`height` are linked to anything other than one Resolution Selector, the run is refused with an error toast. Leaving both unlinked is fine. The browser console logs one `[MOSS bbox sync]` line per bbox node on every run.
 
+### Apply Regional LoRAs inputs
+
 | Input | Meaning |
 |---|---|
 | `seam_feather` | Inward fade at the box edges, as a fraction of the image. 0 is a hard edge. The LoRA never acts outside its box. |
@@ -40,6 +42,14 @@ When boxes overlap, the region with the stronger weighted mask owns each token.
 The log reports how many layers each LoRA matched. A LoRA that matches nothing raises an error.
 
 Recommended strength: 1.0, the same as for a global LoRA. On Yogi, Base and SFT, 1.0 keeps each identity in its box (see `DESIGN.md` §10). Leave `lora_on_text` off.
+
+## Tests
+
+Run from the ComfyUI root with its venv. The test files name the models and LoRAs they use; edit them to match yours.
+
+- `venv\Scripts\python.exe custom_nodes\MOSS-Image-Multi-Character\tests\forward_check.py <diffusion model> <lora> [--fp32]`: single-forward checks against core LoRA patching.
+- `venv\Scripts\python.exe custom_nodes\MOSS-Image-Multi-Character\tests\matrix.py [--server URL] [--seeds 4] [--only yogi,base,sft]`: identity-separation matrix through a running ComfyUI. Results go to `tests/results/`.
+- `node custom_nodes\MOSS-Image-Multi-Character\tests\bbox_sync_e2e.mjs [--server URL] [--vue]`: end-to-end check of the Resolution Selector sync in headless Chrome, through a running ComfyUI.
 
 ## Credits
 

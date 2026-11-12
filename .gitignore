@@ -9,3 +9,4 @@ Thumbs.db
 *.ckpt
 *.pt
 tests/results/images/
+CLAUDE.md

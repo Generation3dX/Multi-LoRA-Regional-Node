@@ -78,7 +78,7 @@ Source: `comfy_extras/nodes_moss_image.py:13-51`
   - `width` and `height`.
   - `character_boxes`, the 1-based box numbers to label `"character"` instead of `"object"`.
 - **Output:** a JSON **string**: `{"summary":{"caption":…},"items":[{label,caption,bbox},…],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}`. Each bbox is converted to centre-origin pixels, with `floor` on the low edge and `ceil` on the high edge (l.43-46). This string goes into a normal `CLIPTextEncode`, so the layout is plain text conditioning. Nothing reaches the DiT except the text.
-- **Not the `BOUNDING_BOX` type.** `Create Bounding Boxes` outputs both a `BOUNDING_BOX` (`bboxes`) and an `Array` (`elements`) (`comfy_extras/nodes_bounding_boxes.py:345-349`). The layout node consumes **`elements`**, not `BOUNDING_BOX`. The CLAUDE.md assumption that they share the `BOUNDING_BOX` type is wrong. See decision D2.
+- **Not the `BOUNDING_BOX` type.** `Create Bounding Boxes` outputs both a `BOUNDING_BOX` (`bboxes`) and an `Array` (`elements`) (`comfy_extras/nodes_bounding_boxes.py:345-349`). The layout node consumes **`elements`**, not `BOUNDING_BOX`. The project brief assumed they share the `BOUNDING_BOX` type; that is wrong. See decision D2.
 - **Base or SFT.** The upstream USERGUIDE documents layout prompts ("Experimental") only in the Base guide. It shows only the `text` and `object` labels and says nothing about SFT. Layout on SFT is **unverified** and has to be tested empirically (matrix row 5).
 - **Guide sampler settings for Base:**
   - ≥ 50 steps, Euler, CFG 3, shift 5.
