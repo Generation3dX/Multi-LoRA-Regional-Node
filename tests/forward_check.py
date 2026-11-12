@@ -3,8 +3,11 @@
 Run from the ComfyUI root with its venv:
     venv\\Scripts\\python.exe custom_nodes\\MOSS-Image-Multi-Character\\tests\\forward_check.py <diffusion model> <lora>
 
-1. Full-image box + LoRA on text must reproduce the globally weight-patched LoRA.
-2. Every hooked layer kind (qkv, o, ffn_up_gate, ffn_down) must fire, also on int8.
+Works on MOSS-Image and Krea 2. Krea 2 runs on an odd-sized latent, so the grid must be padded up like the model's.
+
+1. Full-image box + LoRA on text must reproduce the globally weight-patched LoRA. On Krea 2 the reference LoRA is
+   limited to the image blocks, because the regional path skips the text-only txtfusion layers.
+2. Every hooked layer kind must fire, also on quantized checkpoints.
 3. A left-half box must change the left half much more than the right half.
 """
 import collections
@@ -23,6 +26,7 @@ sys.argv = sys.argv[:3]
 import torch  # noqa: E402
 
 import comfy.cli_args  # noqa: E402,F401
+import comfy.model_base  # noqa: E402
 import comfy.model_management  # noqa: E402
 import comfy.patcher_extension  # noqa: E402
 import comfy.sd  # noqa: E402
@@ -39,8 +43,8 @@ calls = collections.Counter()
 make_hook = node.make_hook
 
 
-def counting_make_hook(entries, masks):
-    hook = make_hook(entries, masks)
+def counting_make_hook(entries, masks, start):
+    hook = make_hook(entries, masks, start)
 
     def wrapped(module, args, out):
         calls[type(module).__name__ + ":" + str(tuple(module.weight.shape))] += 1
@@ -76,18 +80,26 @@ def regional(patcher, bbox, lora_on_text):
 dtype = torch.float32 if fp32 else torch.bfloat16
 model_options = {"dtype": dtype} if dtype == torch.float32 else {}
 base = comfy.sd.load_diffusion_model(folder_paths.get_full_path_or_raise("diffusion_models", model_name), model_options=model_options)
+krea = isinstance(base.model, comfy.model_base.Krea2)
+patch, text_first, blocks = node.FAMILIES[type(base.model)]
 dev = comfy.model_management.get_torch_device()
 g = torch.Generator(device="cpu").manual_seed(0)
-x = torch.randn(1, 128, 64, 64, generator=g).to(dev, dtype)
-ctx = torch.randn(1, 77, 4096, generator=g).to(dev, dtype)
+H, W = (127, 129) if krea else (64, 64)
+x = torch.randn(1, 16 if krea else 128, H, W, generator=g).to(dev, dtype)
+ctx = torch.randn(1, 77, 12 * 2560 if krea else 4096, generator=g).to(dev, dtype)
 
-wrapper = node.RegionalLoRAWrapper([[0, 0, 1000, 500]], [1.0], {}, 0.0, False, dev, dtype)
-m = wrapper.masks(64, 64, 77, dev, dtype)[0].reshape(-1)
-print("mask: left %.0f / %d tokens on, right %.0f, text %.0f" % (m[:4096].view(64, 64)[:, :32].sum(), 64 * 32, m[:4096].view(64, 64)[:, 32:].sum(), m[4096:].sum()))
+wrapper = node.RegionalLoRAWrapper([[0, 0, 1000, 500]], [1.0], {}, 0.0, False, patch, text_first, dev, dtype)
+start, masks = wrapper.masks(H, W, 77, dev, dtype)
+rows, cols = -(-H // patch), -(-W // patch)
+m = masks[0].reshape(rows, cols)
+print("grid %dx%d, masked span starts at %d; left-half box: %.0f tokens on in columns < %.1f, %.0f beyond"
+      % (rows, cols, start, m[:, :cols // 2].sum(), W / patch / 2, m[:, cols // 2 + 1:].sum()))
 sigma = torch.tensor([0.6], device=dev)
 
 out_base = run(base, x, sigma, ctx)
 lora = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("loras", lora_name), safe_load=True)
+if krea:
+    lora = {k: v for k, v in lora.items() if ".txtfusion." not in k}
 out_global = run(comfy.sd.load_lora_for_models(base, None, lora, 1.0, 0)[0], x, sigma, ctx)
 out_full = run(regional(base, [0, 0, 1000, 1000], True), x, sigma, ctx)
 print("hook calls per forward:", dict(calls))
@@ -98,4 +110,4 @@ lora_effect = (out_global - out_base).norm()
 print("1. |regional_full - global| / |global - base| = %.4f  (|global - base| %.2f, |regional_full - base| %.2f)"
       % ((out_full - out_global).norm() / lora_effect, lora_effect, (out_full - out_base).norm()))
 d = (out_left - out_base).abs().mean(dim=(0, 1))
-print("3. mean |change| left half %.5f, right half %.5f" % (d[:, :32].mean(), d[:, 32:].mean()))
+print("3. mean |change| left half %.5f, right half %.5f" % (d[:, :W // 2].mean(), d[:, W // 2:].mean()))

@@ -50,22 +50,30 @@ def ideogram(layout):
                        "compositional_deconstruction": {"background": "plain grey photo studio", "elements": elements}})
 
 
-STYLES = {"prose_noposition": lambda l: prose(l, False), "prose_positional": lambda l: prose(l, True), "ideogram_json": ideogram}
+# layout_encode: the caption this pack's Regional Layout Encode node compiles from the boxes
+STYLES = {"prose_noposition": lambda l: prose(l, False), "prose_positional": lambda l: prose(l, True), "ideogram_json": ideogram, "layout_encode": None}
 
 
-def build(text, seed, prefix):
-    return {
+def build(layout, style, seed, prefix):
+    p = {
         "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": "krea\\krea2_turbo_int8_convrot.safetensors", "weight_dtype": "default"}},
         "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_4b_bf16.safetensors", "type": "krea2", "device": "default"}},
         "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
         "latent": {"class_type": "EmptySD3LatentImage", "inputs": {"width": SIZE, "height": SIZE, "batch_size": 1}},
-        "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": text}},
         "neg": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["pos", 0]}},
         "sampler": {"class_type": "KSampler", "inputs": {"model": ["unet", 0], "positive": ["pos", 0], "negative": ["neg", 0], "latent_image": ["latent", 0],
                                                          "seed": seed, "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
         "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": ["vae", 0]}},
         "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": prefix}},
     }
+    if STYLES[style] is None:
+        editor = [{"x": x0 * SIZE // 1000, "y": y0 * SIZE // 1000, "width": (x1 - x0) * SIZE // 1000, "height": (y1 - y0) * SIZE // 1000,
+                   "metadata": {"type": "obj", "text": "", "desc": desc, "palette": []}} for desc, (y0, x0, y1, x1) in LAYOUTS[layout]]
+        p["boxes"] = {"class_type": "CreateBoundingBoxes", "inputs": {"width": SIZE, "height": SIZE, "editor_state": {"__value__": editor}}}
+        p["pos"] = {"class_type": "RegionalLayoutEncode", "inputs": {"clip": ["clip", 0], "prompt": SCENE, "elements": ["boxes", 2], "width": SIZE, "height": SIZE, "character_boxes": ""}}
+    else:
+        p["pos"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": STYLES[style](layout)}}
+    return p
 
 
 def request(path, data=None):
@@ -93,12 +101,12 @@ def generate(prompt, dest):
 def main():
     OUT.mkdir(exist_ok=True)
     for layout in LAYOUTS:
-        for style, fn in STYLES.items():
+        for style in STYLES:
             for s in SEEDS:
                 dest = OUT / f"{layout}_{style}_{s}.png"
                 if not dest.exists():
                     t = time.time()
-                    generate(build(fn(layout), s, "krea_placement/" + dest.stem), dest)
+                    generate(build(layout, style, s, "krea_placement/" + dest.stem), dest)
                     print(dest.name, "%.1fs" % (time.time() - t), flush=True)
 
     app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"], allowed_modules=["detection"])

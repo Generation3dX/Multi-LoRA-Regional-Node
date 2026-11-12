@@ -261,6 +261,7 @@ The user's Krea 2 character LoRAs (ai-toolkit, rank 32) train **256 layers**: 22
 | small back-left + large right | prose, no positions | 0/4 | 4/4 |
 | small back-left + large right | prose, position and size words | **3/4** | 4/4 |
 | small back-left + large right | Ideogram JSON with bboxes | **0/4** | 4/4 |
+| small back-left + large right | Regional Layout Encode caption (added in Stage 1) | **4/4** | 3/4 (the large woman pushed past the right edge once) |
 
 Side-by-side is Krea 2's default composition, which is why simple two-person layouts look as if they follow the boxes. Box coordinates in the caption are ignored; position and size *words* are followed most of the time. This contradicts the CliffNodes README ("Krea 2 responds to positional box prompts the same way Ideogram 4 does"), and explains why their V12 moved to prose plus attention steering.
 
@@ -302,3 +303,44 @@ Run the Phase 2 identity matrix and the placement probe on Krea.
 - optionally an `attn1_patch` attention mask: a region's text span and its box's image tokens attend only to each other plus the shared caption. This is the core-hook form of V12's ownership, using SDPA masks, no FlexAttention or Triton. Cost to measure: masked attention can fall back from the fastest kernels.
 
 **Out of scope for v1.1:** edit/reference flows (scene and outfit transfer), compose passes and detailers. Reference-image tokens get mask 0, so an edit workflow still runs.
+
+### 11.5 Stage 1 as built and measured
+
+As built:
+- One `FAMILIES` table in `moss_regional_lora.py`. Each entry gives the latent pixels per token, whether text comes first, and which blocks a LoRA may act on.
+- The hook computes LoRA deltas only on the masked token span: the image, plus the text when `lora_on_text` is on. Reference and text tokens cost nothing.
+- Box edges on the canvas border extend over the padded tokens and are not faded. Without this, the half-padded last row and column of an odd Krea latent got no LoRA, and the regional effect came out 10 % weaker than the global one. This also changes MOSS slightly: the outer edge of a box touching the canvas border is no longer faded.
+- `Regional Layout Encode` uses the core Layout Prompt node for MOSS and `krea2_layout_caption` for Krea 2.
+
+`tests/forward_check.py` on a 127×129 Krea latent (64×65 tokens):
+
+| | Krea Cyberrealistic int8 | Krea SickOllie int8_convrot | MOSS Yogi (regression) |
+|---|---|---|---|
+| layers hooked, all firing | 224 (txtfusion 32 skipped) | 224 | 246 |
+| effect size, core LoRA vs regional | 24.33 / 24.45 | 14.47 / 14.51 | 247.4 / 244.5 |
+| rel. difference (int8 rounding in the core reference) | 0.27 | 0.49 | 0.36 |
+
+`tests/matrix.py`, 4 seeds, two women in the left and right halves. Margin is the similarity to the right character minus the similarity to the wrong one:
+
+| config | Krea Cyberrealistic | Krea SickOllie | MOSS Yogi | MOSS Base | MOSS SFT |
+|---|---|---|---|---|---|
+| no LoRA | 0.15 | 0.11 | 0.13 | 0.07 | 0.13 |
+| both LoRAs stacked globally | 0.02 | 0.02 | 0.02 | 0.06 | 0.05 |
+| regional | **0.50** | **0.53** | 0.40 | 0.32 | 0.37 |
+| regional + `lora_on_text` | 0.50 | 0.52 | 0.37 | 0.35 | — |
+
+The cost of skipping txtfusion, as similarity to the character's own reference with one LoRA applied regionally on a full-canvas box, against the global LoRA's own images:
+
+| | Joni global / regional | Sansa global / regional |
+|---|---|---|
+| Krea Cyberrealistic | 0.935 / 0.894 | 0.872 / 0.790 |
+| Krea SickOllie | 0.926 / 0.882 | 0.901 / 0.840 |
+| MOSS Yogi | 0.903 / 0.867 | 0.885 / 0.873 |
+
+What the numbers and the contact sheets show:
+- **Separation:** Krea 2 separates the two identities better than MOSS. There is no visible bleed and no seam artefact; Joni keeps her fringe and Sansa does not.
+- **Skipping txtfusion** costs 0.04–0.08 similarity on Krea, about the same as MOSS loses with its text tokens left out. Both stay well above the other character's 0.11–0.30.
+- **`lora_on_text`** gives Sansa Joni's fringe and styling on Krea, as on MOSS. It stays off and hidden.
+- **Placement:** the Regional Layout Encode caption hits the small back-left box 4/4 (§11.2), so coarse layouts work. Precise positions do not, because Krea 2 does not read coordinates.
+
+Stage 2 (text spans, attention ownership) is not justified by these numbers. Revisit it if real multi-character scenes show placement or likeness problems that the boxes cannot fix.
