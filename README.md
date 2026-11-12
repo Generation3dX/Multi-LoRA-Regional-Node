@@ -14,6 +14,8 @@ Clone into `ComfyUI/custom_nodes/` and restart ComfyUI. There are no extra depen
 
 ## Usage
 
+For a step-by-step guide to paste into a workflow's Markdown Note, see [workflow_instructions.md](workflow_instructions.md).
+
 1. **Create Bounding Boxes**: draw one box per character and describe the character in the box description.
 2. **Regional Layout Encode**: wire in `clip`, `elements` and the image `width`/`height`, and write the overall prompt. Its `CONDITIONING` goes to the sampler's positive input. It writes the layout in the form the loaded text encoder's model understands:
    - MOSS-Image: the layout JSON of core's MOSS-Image Layout Prompt. List the character boxes in `character_boxes`.
